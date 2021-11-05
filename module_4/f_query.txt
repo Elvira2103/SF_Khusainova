@@ -1,0 +1,108 @@
+/* Итоговый запрос */
+
+WITH anapa_flight AS
+  (-- таблица с рейсами из анапы
+SELECT *
+   FROM dst_project.flights
+   WHERE departure_airport = 'AAQ'
+     AND (date_trunc('month', scheduled_departure) in ('2017-01-01',
+                                                       '2017-02-01',
+                                                       '2017-12-01'))
+     AND status not in ('Cancelled') 
+  ),
+  --таблица со стоимостью и количеством билетов по классам
+ anapa_ticket AS
+  (SELECT af.flight_id,
+          count(CASE
+                    WHEN tf.fare_conditions = 'Economy' THEN tf.fare_conditions
+                END) AS ticket_economy,
+          count(CASE
+                    WHEN tf.fare_conditions = 'Comfort' THEN tf.fare_conditions
+                END) AS ticket_comfort,
+          count(CASE
+                    WHEN tf.fare_conditions = 'Business' THEN tf.fare_conditions
+                END) AS ticket_business,
+          sum(CASE
+                  WHEN tf.fare_conditions = 'Economy' THEN tf.amount
+              END) AS sum_ticket_economy,
+          sum(CASE
+                  WHEN tf.fare_conditions = 'Comfort' THEN tf.amount
+              END) AS sum_ticket_comfort,
+          sum(CASE
+                  WHEN tf.fare_conditions = 'Business' THEN tf.amount
+              END) AS sum_ticket_business
+   FROM anapa_flight af
+   LEFT JOIN dst_project.ticket_flights tf ON af.flight_id = tf.flight_id
+   GROUP BY af.flight_id
+  ), 
+  --таблица с названиями городов и координатами
+ anapa_city AS (
+	 SELECT af.flight_id,
+          ap1.city AS departure_city,
+          ap1.longitude AS departure_longitude,
+          ap1.latitude AS departure_latitude,
+          ap2.city AS arrival_city,
+          ap2.longitude AS arrival_longitude,
+          ap2.latitude AS arrival_latitude
+   FROM anapa_flight af
+   LEFT JOIN dst_project.airports ap1 ON af.departure_airport = ap1.airport_code
+   LEFT JOIN dst_project.airports ap2 ON af.arrival_airport = ap2.airport_code
+ ),
+ aircraft AS (
+--характеристики самолетов
+ SELECT ac.aircraft_code,
+        ac.model,
+        ac.range,
+        count(CASE
+                  WHEN s.fare_conditions = 'Economy' THEN s.fare_conditions
+              END) AS seat_economy,
+        count(CASE
+                  WHEN s.fare_conditions = 'Comfort' THEN s.fare_conditions
+              END) AS seat_comfort,
+        count(CASE
+                  WHEN s.fare_conditions = 'Business' THEN s.fare_conditions
+              END) AS seat_business
+   FROM dst_project.aircrafts ac
+   LEFT JOIN dst_project.seats s ON ac.aircraft_code = s.aircraft_code
+   GROUP BY 1,2
+  ),
+ raschet_duration AS (
+  SELECT af.flight_id,
+          af.scheduled_arrival-af.scheduled_departure scheduled_duration,
+          af.actual_arrival-af.actual_departure actual_duration
+   FROM anapa_flight AS af
+ )
+
+--итоговая таблица
+
+SELECT af.flight_id,
+       af.flight_no,
+	   anc.departure_city,
+       anc.departure_longitude,
+       anc.departure_latitude,
+       anc.arrival_city,
+       anc.arrival_longitude,
+       anc.arrival_latitude,
+       af.scheduled_departure,
+       af.scheduled_arrival,
+       af.actual_departure,
+       af.actual_arrival,
+       date_part('hour', rt.scheduled_duration)*60 + date_part('minute', rt.scheduled_duration) scheduled_duration,
+       date_part('hour', rt.actual_duration)*60 + date_part('minute', rt.actual_duration) actual_duration,       
+       ac.model,
+       ac.seat_economy,
+       ac.seat_comfort,
+       ac.seat_business,
+       ac.range,
+       ant.ticket_economy,
+       ant.ticket_comfort,
+       ant.ticket_business,
+       ant.sum_ticket_economy,
+       ant.sum_ticket_comfort,
+       ant.sum_ticket_business
+FROM anapa_flight AS af
+LEFT JOIN anapa_city AS anc ON af.flight_id = anc.flight_id
+LEFT JOIN aircraft AS ac ON af.aircraft_code = ac.aircraft_code
+LEFT JOIN raschet_duration AS rt ON af.flight_id = rt.flight_id 
+LEFT JOIN anapa_ticket AS ant ON af.flight_id = ant.flight_id
+
